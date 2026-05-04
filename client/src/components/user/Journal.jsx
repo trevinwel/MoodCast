@@ -18,6 +18,10 @@ export default function Journal() {
   const recognitionRef = useRef(null);
   const isRecordingRef = useRef(false); 
   const transcriptRef = useRef("");
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [aiResponse, setAiResponse] = useState("");
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
 
   const fetchEntries = async () => {
     try {
@@ -36,72 +40,71 @@ export default function Journal() {
   }, []);
 
   const toggleDictation = async () => {
-  
-  if (isRecording) {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
+    
+    if (isRecording) {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+        setIsRecording(false);
+      }
+      return;
     }
-    return;
-  }
 
-
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const recorder = new MediaRecorder(stream);
-    audioChunksRef.current = [];
-
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) {
-        audioChunksRef.current.push(e.data);
-      }
-    };
-
-    recorder.onstop = async () => {
-      
-      const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+    
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
       
       
-      const formData = new FormData();
-      formData.append('file', audioBlob, 'journal_voice.wav');
+      audioChunksRef.current = [];
 
-      setIsAnalyzing(true); 
-      
-      try {
-        
-        const response = await axios.post('http://127.0.0.1:8000/api/journal/voice', formData, {
-          headers: { 'Content-Type': 'multipart/form-data' }
-        });
-
-        
-        if (response.data.transcript) {
-          setEntryText((prev) => (prev + (prev ? " " : "") + response.data.transcript).trim());
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
         }
+      };
+
+      recorder.onstop = async () => {
         
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+        const formData = new FormData();
+        formData.append('file', audioBlob, 'journal_voice.wav');
+
+        setIsAnalyzing(true); 
         
-        if (response.data.analysis) {
-          setAiResponse(response.data.analysis);
+        try {
+          
+          const response = await axios.post('http://127.0.0.1:8000/api/journal/voice', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
+          });
+
+          if (response.data.transcript) {
+            setEntryText((prev) => (prev + (prev ? " " : "") + response.data.transcript).trim());
+          }
+          
+          if (response.data.analysis) {
+            setAiResponse(response.data.analysis);
+          }
+
+        } catch (err) {
+          console.error("Local Whisper processing failed:", err);
+          alert("Local AI server is offline. Check your terminal!");
+        } finally {
+          setIsAnalyzing(false);
+          
+          stream.getTracks().forEach(track => track.stop());
         }
+      };
 
-      } catch (err) {
-        console.error("Local Whisper processing failed:", err);
-        alert("Local AI server is offline. Check your terminal!");
-      } finally {
-        setIsAnalyzing(false);
-        
-        stream.getTracks().forEach(track => track.stop());
-      }
-    };
+      
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setIsRecording(true);
 
-    recorder.start();
-    mediaRecorderRef.current = recorder;
-    setIsRecording(true);
-
-  } catch (err) {
-    console.error("Mic access denied:", err);
-    alert("Please allow microphone access for local dictation.");
-  }
-};
+    } catch (err) {
+      console.error("Mic access denied:", err);
+      alert("Please allow microphone access for local dictation.");
+    }
+  };
 
   const moods = [
     { icon: Smile, label: "Great", color: "#f59e0b", bg: "#fef3c7" },
@@ -350,6 +353,7 @@ export default function Journal() {
           )}
         </div>
       </div>
+
 
       
       {crisisAlert && (

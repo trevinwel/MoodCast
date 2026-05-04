@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
 from faster_whisper import WhisperModel
+from dotenv import load_dotenv
 import os
 import database 
 import datetime
@@ -14,6 +15,28 @@ import re
 
 app = FastAPI(title="MoodCast Sovereign Core")
 
+load_dotenv()
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM")
+
+def analyze_with_local_llm(text):
+    try:
+        url = "http://localhost:11434/api/generate"
+        payload = {
+            "model": "gemma3:4b",  
+            "prompt": f"You are a supportive AI for a journal app. Analyze this entry and give a 1-2 sentence empathetic response: {text}",
+            "stream": False
+        }
+        
+        response = requests.post(url, json=payload, timeout=15)
+        response.raise_for_status()
+        
+        return response.json().get("response", "I'm listening. Your thoughts are safe here.")
+        
+    except Exception as e:
+        print(f"--- Ollama Error: {e} ---")
+        return "I'm here for you. It's good to get those thoughts out."
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -22,8 +45,6 @@ app.add_middleware(
 )
 
 
-JWT_SECRET_KEY = "moodcast-sovereign-vault-super-secret-key-2026"
-JWT_ALGORITHM = "HS256"
 
 
 class UserAuth(BaseModel):
@@ -66,6 +87,7 @@ system_config = {
 def on_startup():
     database.init_db()
     print("--- MoodCast: Local Database Initialized ---")
+
 
 
 
@@ -141,7 +163,7 @@ async def add_entry(entry: EntryCreate, db: Session = Depends(get_db)):
             print("CRISIS DETECTED: Keyword match.")
 
     
-    from database import cipher 
+    from database import cipher
     encrypted_text = cipher.encrypt(entry.content.encode())
     
     tags_json = json.dumps(entry.tags) if entry.tags else "[]"
@@ -349,10 +371,13 @@ def register_user(user: UserAuth, db: Session = Depends(get_db)):
 @app.post("/login")
 def login_user(user: UserAuth, db: Session = Depends(get_db)):
     db_user = db.query(database.User).filter(database.User.username == user.username).first()
+    
     if not db_user or db_user.hashed_password != user.password:
         raise HTTPException(status_code=401, detail="Invalid credentials")
-        
-    expiration_time = datetime.datetime.utcnow() + datetime.timedelta(hours=24)
+    
+    
+    expiration_time = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=24)
+    
     token_payload = {
         "sub": db_user.username,
         "is_admin": db_user.is_admin,
