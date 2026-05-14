@@ -41,7 +41,10 @@ Local AI / LLM: Gemma 3 (via local environment)
 Transcription: Faster-Whisper 
 
 Dependencies:
-To ensure a smooth demonstration, the node_modules for the frontend are pre-included in this repository/folder. You do not need to run npm install. Simply navigate to the /client directory and run npm run dev.
+cd client
+npm install
+cd server
+pip install -r requirements.txt
 
 Prerequisites
 Before running MoodCast, ensure the following are installed:
