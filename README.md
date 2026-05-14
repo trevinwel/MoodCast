@@ -41,10 +41,7 @@ Local AI / LLM: Gemma 3 (via local environment)
 Transcription: Faster-Whisper 
 
 Dependencies:
-cd client
-npm install
-cd server
-pip install -r requirements.txt
+cd client,  npm install ,cd server , pip install -r requirements.txt
 
 Prerequisites
 Before running MoodCast, ensure the following are installed:
