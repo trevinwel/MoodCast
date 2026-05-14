@@ -28,7 +28,7 @@ def analyze_with_local_llm(text):
             "stream": False
         }
         
-        response = requests.post(url, json=payload, timeout=15)
+        response = requests.post(url, json=payload, timeout=60)
         response.raise_for_status()
         
         return response.json().get("response", "I'm listening. Your thoughts are safe here.")
@@ -86,7 +86,7 @@ system_config = {
 @app.on_event("startup")
 def on_startup():
     database.init_db()
-    print("--- MoodCast: Local Database Initialized ---")
+    
 
 
 
@@ -105,7 +105,7 @@ async def add_entry(entry: EntryCreate, db: Session = Depends(get_db)):
         fillers = ["the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "is", "it", "of"]
         words = content_to_analyze.split()
         content_to_analyze = " ".join([w for w in words if w.lower() not in fillers])
-        print(f"Pruned text for faster AI processing: {content_to_analyze}")
+       
 
     prompt = f"""
     Analyze the following journal entry and provide ONLY a single integer from 1 to 10 representing the mood.
@@ -187,22 +187,27 @@ async def add_entry(entry: EntryCreate, db: Session = Depends(get_db)):
 def get_mood_forecast(username: str, lang: str = "en-US", db: Session = Depends(get_db)):
     entries = db.query(database.JournalEntry).filter(database.JournalEntry.owner_username == username).all()
     
+    actual_scores = [e.sentiment_score for e in entries if e.sentiment_score is not None]
+    
+    if not actual_scores:
+        return {"forecast": [5.0]*7, "insight": "No data yet. Start journaling!"}
+
+    current_avg = round(sum(actual_scores) / len(actual_scores), 1)
+
     day_totals = {i: [] for i in range(7)}
     for e in entries:
         if e.sentiment_score is not None:
-            day_of_week = e.timestamp.weekday() 
+            day_of_week = e.timestamp.weekday()
             day_totals[day_of_week].append(e.sentiment_score)
             
     real_forecast = []
     for i in range(7):
         if len(day_totals[i]) > 0:
-            day_avg = sum(day_totals[i]) / len(day_totals[i])
-            real_forecast.append(round(day_avg, 1))
+            real_forecast.append(round(sum(day_totals[i]) / len(day_totals[i]), 1))
         else:
             real_forecast.append(5.0) 
             
-    current_avg = round(sum(real_forecast)/7, 1)
-    insight_msg = f"Analysis of {len(entries)} entries complete. Your 7-day emotional moving average is {current_avg}/10."
+    insight_msg = f"Average: {current_avg}/10."
 
     if len(entries) >= 3:
         language_instruction = ""
@@ -212,22 +217,29 @@ def get_mood_forecast(username: str, lang: str = "en-US", db: Session = Depends(
             language_instruction = "You MUST write your response in Tamil."
 
         prompt = f"""
-        Act as an empathetic mental health AI in a secure journaling app.
-        The user's recent mood scores (out of 10) are: {real_forecast}. Their overall average is {current_avg}/10.
-        Write a brief, 2-sentence supportive insight based on this data to encourage them. Do not give medical advice.
+        You are a grounded, literalist mood analyst. 
+        The user has {len(entries)} recent entries with these specific scores: {actual_scores}.
+        Their actual average is {current_avg}/10.
+
+        IMPORTANT: 
+        - A score of 7 is GOOD/STABLE. Do not act like the user is sad if they are scoring 7s.
+        - Write a 2-sentence insight. Be brief and don't be overly dramatic.
         {language_instruction}
         """
         try:
             response = requests.post('http://localhost:11434/api/generate', json={
                 "model": "gemma3:4b",
                 "prompt": prompt,
-                "stream": False
+                "stream": False,
+                "options": {
+                    "temperature": 0.2
+                }
             }, timeout=60)
             
             if response.status_code == 200:
                 insight_msg = response.json().get("response", insight_msg).strip()
-        except Exception as e:
-            print(f"Local AI offline for forecast: {e}")
+        except Exception:
+            pass
 
     return {
         "forecast": real_forecast, 
@@ -430,24 +442,40 @@ def nuke_vault(username: str, db: Session = Depends(get_db)):
     print(f"--- VAULT OBLITERATED FOR USER: {username} ---")
     return {"status": "Obliterated"}
 
-model = WhisperModel("base", device="cpu", compute_type="int8")
+model = WhisperModel("tiny", device="cpu", compute_type="int8")
+
 @app.post("/api/journal/voice")
 async def process_voice_journal(file: UploadFile = File(...)):
-   
     temp_filename = "temp_audio.wav"
-    with open(temp_filename, "wb") as buffer:
-        buffer.write(await file.read())
-
     
-    segments, info = model.transcribe(temp_filename, beam_size=5)
-    full_text = " ".join([segment.text for segment in segments])
-
     
-    os.remove(temp_filename)
-    ai_analysis = analyze_with_local_llm(full_text)
-    
-    return {"transcript": full_text, "analysis": ai_analysis}
+    try:
+        content = await file.read()
+        with open(temp_filename, "wb") as buffer:
+            buffer.write(content)
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+        
+        segments, info = model.transcribe(
+            temp_filename, 
+            beam_size=1, 
+            vad_filter=True,
+            word_timestamps=False
+        )
+        
+        full_text = " ".join([segment.text for segment in segments]).strip()
+
+        
+        if os.path.exists(temp_filename):
+            os.remove(temp_filename)
+
+        if not full_text:
+            return {"transcript": "", "analysis": "I couldn't hear anything. Try speaking a bit louder?"}
+
+        ai_analysis = analyze_with_local_llm(full_text)
+        return {"transcript": full_text, "analysis": ai_analysis}
+
+    except Exception as e:
+        if os.path.exists(temp_filename):
+            os.remove(temp_filename)
+        print(f"Transcription Error: {e}")
+        raise HTTPException(status_code=500, detail="Voice processing failed.")
