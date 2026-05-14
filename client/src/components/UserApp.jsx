@@ -1,6 +1,5 @@
 import React, { useState } from "react";
-
-import { Home, BookOpen, Target, BarChart2, CalendarDays, Settings as SettingsIcon, Cpu } from "lucide-react";
+import { Home, BookOpen, Target, BarChart2, CalendarDays, Settings as SettingsIcon } from "lucide-react";
 
 import UserHome from "./user/UserHome";
 import Journal from "./user/Journal";
@@ -8,8 +7,6 @@ import HabitTracker from "./user/HabitTracker";
 import Dashboard from "./user/Dashboard";
 import Forecast from "./user/MoodForecast"; 
 import Settings from "./user/UserSettings"; 
-
-import Diagnostics from "./user/Diagnostics"; 
 
 export default function UserApp({ onLogout }) {
   const [activeTab, setActiveTab] = useState("home");
@@ -21,32 +18,27 @@ export default function UserApp({ onLogout }) {
       case "habits": return <HabitTracker />; 
       case "dashboard": return <Dashboard />;
       case "forecast": return <Forecast />;
-      case "diagnostics": return <Diagnostics />; 
       case "settings": return <Settings onLogout={onLogout} />;
       default: return <UserHome />;
     }
   };
 
-  
   const navItems = [
     { id: "home", label: "Home", icon: Home },
     { id: "journal", label: "Journal", icon: BookOpen },
     { id: "habits", label: "Habits", icon: Target }, 
     { id: "dashboard", label: "Data", icon: BarChart2 },
     { id: "forecast", label: "Forecast", icon: CalendarDays },
-    { id: "diagnostics", label: "System", icon: Cpu }, 
     { id: "settings", label: "Settings", icon: SettingsIcon },
   ];
 
   return (
     <div style={{ position: "relative", minHeight: "100vh", backgroundColor: "#f9f8fd" }}>
       
-      
       <div style={{ paddingBottom: "100px" }}>
         {renderView()}
       </div>
 
-      
       <div 
         style={{
           position: "fixed",
@@ -115,7 +107,6 @@ export default function UserApp({ onLogout }) {
           );
         })}
       </div>
-      
     </div>
   );
 }

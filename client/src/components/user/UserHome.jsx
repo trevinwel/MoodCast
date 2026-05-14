@@ -19,6 +19,7 @@ export default function UserHome() {
   const isRecordingRef = useRef(false);
   const transcriptRef = useRef(""); 
   const finalizedTextRef = useRef(""); 
+  const audioChunksRef = useRef([]);
   
   useEffect(() => { 
     const now = new Date();
@@ -76,119 +77,102 @@ export default function UserHome() {
   };
 
   const toggleRecording = async () => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) return alert(t("Web Speech API not supported in this browser."));
-
-    if (!isRecordingRef.current) {
-      
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mediaRecorder.current = new MediaRecorder(stream);
-        mediaRecorder.current.start();
-        
-        isRecordingRef.current = true;
-        setIsRecording(true);
-        setTranscript(t("Listening..."));
-        transcriptRef.current = "";
-        finalizedTextRef.current = "";
-
-        // THE LOOP
-        const startListening = () => {
-          if (!isRecordingRef.current) return;
-
-          const recognition = new SpeechRecognition();
-          recognition.continuous = true;
-          recognition.interimResults = true;
-          recognition.lang = 'en-US';
-
-          recognition.onresult = (event) => {
-            let currentInterim = "";
-            let currentFinal = "";
-            
-            for (let i = event.resultIndex; i < event.results.length; i++) {
-              if (event.results[i].isFinal) {
-                currentFinal += event.results[i][0].transcript;
-              } else {
-                currentInterim += event.results[i][0].transcript;
-              }
-            }
-            
-            if (currentFinal) {
-              finalizedTextRef.current = (finalizedTextRef.current + " " + currentFinal).trim();
-            }
-            
-            const fullText = (finalizedTextRef.current + " " + currentInterim).trim();
-            setTranscript(fullText || t("Listening..."));
-            transcriptRef.current = fullText;
-          };
-
-          recognition.onerror = (event) => {
-            if (event.error === 'not-allowed') {
-              isRecordingRef.current = false; setIsRecording(false);
-            }
-          };
-
-          recognition.onend = () => {
-            if (isRecordingRef.current) {
-              setTimeout(() => {
-                if (isRecordingRef.current) startListening();
-              }, 250);
-            }
-          };
-
-          try {
-            recognition.start();
-            recognitionRef.current = recognition;
-          } catch (e) { console.error("Mic start failed", e); }
-        };
-
-        startListening();
-
-      } catch (err) { 
-        console.error(err); 
-        alert(t("Please allow microphone access."));
-      }
-    } else {
-      
-      isRecordingRef.current = false;
-      setIsRecording(false);
-      
-      
-      if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
-        mediaRecorder.current.stop();
-        mediaRecorder.current.stream.getTracks().forEach(track => track.stop());
-      }
-      
-      
-      if (recognitionRef.current) recognitionRef.current.stop();
-      
-      const activeUser = localStorage.getItem("username");
-      const finalPayload = transcriptRef.current.trim();
+  if (!isRecordingRef.current) {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorder.current = new MediaRecorder(stream);
+      audioChunksRef.current = []; 
 
       
-      if (finalPayload && finalPayload !== t("Listening...") && activeUser) {
-         try {
-          await fetch("http://127.0.0.1:8000/add_entry/", {
+      mediaRecorder.current.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      
+      mediaRecorder.current.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+        const formData = new FormData();
+        formData.append("file", audioBlob, "journal_audio.wav");
+
+        setTranscript(t("Processing with Gemma 3..."));
+
+        try {
+          const response = await fetch("http://127.0.0.1:8000/api/journal/voice", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ 
-              username: activeUser, 
-              content: `Voice Note: ${finalPayload}`, 
-              mood: "Neutral", 
-              tags: ["Voice Log"] 
-            }),
+            body: formData, 
           });
-          fetchStats();
-        } catch (e) { console.error(e); }
-      }
+          
+          const result = await response.json();
+          
+          
+          if (result.transcript) {
+            setTranscript(result.transcript);
+            setInsight({ 
+              title: t("AI Analysis"), 
+              body: result.analysis 
+            });
+            
+            
+            const activeUser = localStorage.getItem("username");
+            await fetch("http://127.0.0.1:8000/add_entry/", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ 
+                username: activeUser, 
+                content: result.transcript, 
+                mood: "Neutral", 
+                tags: ["Voice Log"] 
+              }),
+            });
+            fetchStats();
+          }
+        } catch (e) {
+          console.error("Backend error:", e);
+          setTranscript(t("Could not connect to local AI."));
+        }
+      };
+
+      mediaRecorder.current.start();
+      isRecordingRef.current = true;
+      setIsRecording(true);
+      setTranscript(t("Listening..."));
+
       
-      setTimeout(() => {
-        setTranscript("");
-        transcriptRef.current = "";
-        finalizedTextRef.current = "";
-      }, 2000);
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.onresult = (event) => {
+          let current = "";
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            current += event.results[i][0].transcript;
+          }
+          setTranscript(current || t("Listening..."));
+        };
+        recognition.start();
+        recognitionRef.current = recognition;
+      }
+
+    } catch (err) {
+      console.error(err);
+      alert(t("Please allow microphone access."));
     }
-  };
+  } else {
+    
+    isRecordingRef.current = false;
+    setIsRecording(false);
+
+    if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
+      mediaRecorder.current.stop(); 
+      mediaRecorder.current.stream.getTracks().forEach(track => track.stop());
+    }
+
+    if (recognitionRef.current) recognitionRef.current.stop();
+  }
+};
 
   const getFeedAesthetic = (mood) => {
     if (mood === "Great") return { icon: Sun, color: "#f59e0b", bg: "#fef3c7" }; 
