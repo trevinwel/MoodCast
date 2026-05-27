@@ -41,7 +41,11 @@ Local AI / LLM: Gemma 3 (via local environment)
 Transcription: Faster-Whisper 
 
 Dependencies:
+<<<<<<< HEAD
 cd client,  npm install ,cd server , pip install -r requirements.txt
+=======
+cd client, npm install ,cd server , pip install -r requirements.txt
+>>>>>>> 97fc6d5 (bug fix)
 
 Prerequisites
 Before running MoodCast, ensure the following are installed:
@@ -68,7 +72,13 @@ source venv/Scripts/activate
 pip install -r requirements.txt
 
 Running the Application
+<<<<<<< HEAD
 cd server
+=======
+
+cd server
+python -m uvicorn main:app --reload
+>>>>>>> 97fc6d5 (bug fix)
 python main.py
 
 Terminal 2: Launch the Frontend (Client)
@@ -110,4 +120,8 @@ Boot the FastAPI Sovereign Server (Port 8000).
 
 Compile the React Client Dashboard (Port 3000).
 
+<<<<<<< HEAD
 Trigger the Ethical Fail-safe & Crisis Monitor.
+=======
+Trigger the Ethical Fail-safe & Crisis Monitor.
+>>>>>>> 97fc6d5 (bug fix)

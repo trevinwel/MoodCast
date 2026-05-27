@@ -12,12 +12,59 @@ import datetime
 import json 
 import jwt 
 import re
+import os
+import shutil
 
 app = FastAPI(title="MoodCast Sovereign Core")
 
 load_dotenv()
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM")
+
+model = WhisperModel("base", device="cpu", compute_type="int8")
+
+@app.post("/api/journal/voice")
+async def process_voice_journal(file: UploadFile = File(...)):
+    temp_raw = "temp_raw.dat"
+    temp_wav = "temp_audio.wav"
+    
+    try:
+        with open(temp_raw, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        if os.path.exists(temp_wav):
+            os.remove(temp_wav)
+        os.rename(temp_raw, temp_wav)
+
+        segments, info = model.transcribe(
+            temp_wav, 
+            beam_size=1, 
+            vad_filter=False,
+            word_timestamps=False
+        )
+        
+        full_text = " ".join([segment.text for segment in segments]).strip()
+
+        if os.path.exists(temp_wav):
+            os.remove(temp_wav)
+
+        if not full_text:
+            return {"transcript": "", "analysis": "No speech detected. Please speak clearly into the microphone."}
+
+        ai_analysis = analyze_with_local_llm(full_text)
+        
+        return {
+            "transcript": full_text,
+            "analysis": ai_analysis,
+            "status": "success"
+        }
+
+    except Exception as e:
+        if os.path.exists(temp_raw): 
+            os.remove(temp_raw)
+        if os.path.exists(temp_wav): 
+            os.remove(temp_wav)
+        raise HTTPException(status_code=500, detail=f"Audio processing failed: {str(e)}")
 
 def analyze_with_local_llm(text):
     try:
@@ -43,7 +90,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 
 
@@ -442,40 +488,3 @@ def nuke_vault(username: str, db: Session = Depends(get_db)):
     print(f"--- VAULT OBLITERATED FOR USER: {username} ---")
     return {"status": "Obliterated"}
 
-model = WhisperModel("tiny", device="cpu", compute_type="int8")
-
-@app.post("/api/journal/voice")
-async def process_voice_journal(file: UploadFile = File(...)):
-    temp_filename = "temp_audio.wav"
-    
-    
-    try:
-        content = await file.read()
-        with open(temp_filename, "wb") as buffer:
-            buffer.write(content)
-
-        
-        segments, info = model.transcribe(
-            temp_filename, 
-            beam_size=1, 
-            vad_filter=True,
-            word_timestamps=False
-        )
-        
-        full_text = " ".join([segment.text for segment in segments]).strip()
-
-        
-        if os.path.exists(temp_filename):
-            os.remove(temp_filename)
-
-        if not full_text:
-            return {"transcript": "", "analysis": "I couldn't hear anything. Try speaking a bit louder?"}
-
-        ai_analysis = analyze_with_local_llm(full_text)
-        return {"transcript": full_text, "analysis": ai_analysis}
-
-    except Exception as e:
-        if os.path.exists(temp_filename):
-            os.remove(temp_filename)
-        print(f"Transcription Error: {e}")
-        raise HTTPException(status_code=500, detail="Voice processing failed.")
